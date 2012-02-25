@@ -1,0 +1,128 @@
+//
+// Description : Array and textureless GLSL 2D/3D/4D simplex 
+//               noise functions.
+//      Author : Ian McEwan, Ashima Arts.
+//  Maintainer : ijm
+//     Lastmod : 20110822 (ijm)
+//     License : Copyright (C) 2011 Ashima Arts. All rights reserved.
+//               Distributed under the MIT License. See LICENSE file.
+//               https://github.com/ashima/webgl-noise
+// 
+
+half4 mod289(half4 x) {
+  return x - floor(x * (1.0 / 289.0)) * 289.0; }
+
+half mod289(half x) {
+  return x - floor(x * (1.0 / 289.0)) * 289.0; }
+
+half4 permute(half4 x) {
+     return mod289(((x*34.0)+1.0)*x);
+}
+
+half permute(half x) {
+     return mod289(((x*34.0)+1.0)*x);
+}
+
+half4 taylorInvSqrt(half4 r)
+{
+  return 1.79284291400159 - 0.85373472095314 * r;
+}
+
+half taylorInvSqrt(half r)
+{
+  return 1.79284291400159 - 0.85373472095314 * r;
+}
+
+half4 grad4(half j, half4 ip)
+  {
+  const half4 ones = half4(1.0, 1.0, 1.0, -1.0);
+  half4 p,s;
+
+  p.xyz = floor( frac (half3(j) * ip.xyz) * 7.0) * ip.z - 1.0;
+  p.w = 1.5 - dot(abs(p.xyz), ones.xyz);
+  s = half4(lessThan(p, half4(0.0)));
+  p.xyz = p.xyz + (s.xyz*2.0 - 1.0) * s.www; 
+
+  return p;
+  }
+
+half snoise(half4 v)
+  {
+  const half4  C = half4( 0.138196601125011,  // (5 - sqrt(5))/20  G4
+                        0.276393202250021,  // 2 * G4
+                        0.414589803375032,  // 3 * G4
+                       -0.447213595499958); // -1 + 4 * G4
+						
+// (sqrt(5) - 1)/4 = F4, used once below
+#define F4 0.309016994374947451
+
+// First corner
+  half4 i  = floor(v + dot(v, half4(F4)) );
+  half4 x0 = v -   i + dot(i, C.xxxx);
+
+// Other corners
+
+// Rank sorting originally contributed by Bill Licea-Kane, AMD (formerly ATI)
+  half4 i0;
+  half3 isX = step( x0.yzw, x0.xxx );
+  half3 isYZ = step( x0.zww, x0.yyz );
+//  i0.x = dot( isX, half3( 1.0 ) );
+  i0.x = isX.x + isX.y + isX.z;
+  i0.yzw = 1.0 - isX;
+//  i0.y += dot( isYZ.xy, half2( 1.0 ) );
+  i0.y += isYZ.x + isYZ.y;
+  i0.zw += 1.0 - isYZ.xy;
+  i0.z += isYZ.z;
+  i0.w += 1.0 - isYZ.z;
+
+  // i0 now contains the unique values 0,1,2,3 in each channel
+  half4 i3 = clamp( i0, 0.0, 1.0 );
+  half4 i2 = clamp( i0-1.0, 0.0, 1.0 );
+  half4 i1 = clamp( i0-2.0, 0.0, 1.0 );
+
+  //  x0 = x0 - 0.0 + 0.0 * C.xxxx
+  //  x1 = x0 - i1  + 1.0 * C.xxxx
+  //  x2 = x0 - i2  + 2.0 * C.xxxx
+  //  x3 = x0 - i3  + 3.0 * C.xxxx
+  //  x4 = x0 - 1.0 + 4.0 * C.xxxx
+  half4 x1 = x0 - i1 + C.xxxx;
+  half4 x2 = x0 - i2 + C.yyyy;
+  half4 x3 = x0 - i3 + C.zzzz;
+  half4 x4 = x0 + C.wwww;
+
+// Permutations
+  i = mod289(i); 
+  half j0 = permute( permute( permute( permute(i.w) + i.z) + i.y) + i.x);
+  half4 j1 = permute( permute( permute( permute (
+             i.w + half4(i1.w, i2.w, i3.w, 1.0 ))
+           + i.z + half4(i1.z, i2.z, i3.z, 1.0 ))
+           + i.y + half4(i1.y, i2.y, i3.y, 1.0 ))
+           + i.x + half4(i1.x, i2.x, i3.x, 1.0 ));
+
+// Gradients: 7x7x6 points over a cube, mapped onto a 4-cross polytope
+// 7*7*6 = 294, which is close to the ring size 17*17 = 289.
+  half4 ip = half4(1.0/294.0, 1.0/49.0, 1.0/7.0, 0.0) ;
+
+  half4 p0 = grad4(j0,   ip);
+  half4 p1 = grad4(j1.x, ip);
+  half4 p2 = grad4(j1.y, ip);
+  half4 p3 = grad4(j1.z, ip);
+  half4 p4 = grad4(j1.w, ip);
+
+// Normalise gradients
+  half4 norm = taylorInvSqrt(half4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+  p0 *= norm.x;
+  p1 *= norm.y;
+  p2 *= norm.z;
+  p3 *= norm.w;
+  p4 *= taylorInvSqrt(dot(p4,p4));
+
+// Mix contributions from the five corners
+  half3 m0 = max(0.6 - half3(dot(x0,x0), dot(x1,x1), dot(x2,x2)), 0.0);
+  half2 m1 = max(0.6 - half2(dot(x3,x3), dot(x4,x4)            ), 0.0);
+  m0 = m0 * m0;
+  m1 = m1 * m1;
+  return 49.0 * ( dot(m0*m0, half3( dot( p0, x0 ), dot( p1, x1 ), dot( p2, x2 )))
+               + dot(m1*m1, half2( dot( p3, x3 ), dot( p4, x4 ) ) ) ) ;
+
+  }
